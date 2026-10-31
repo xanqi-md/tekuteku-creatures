@@ -1,0 +1,217 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>balance</title>
+<pre id="out"></pre>
+<script src="../js/data-rules.js"></script>
+<script src="../js/data-creatures.js"></script>
+<script src="../js/balance-tuned.js"></script>
+<script src="../js/engine.js"></script>
+<script>
+// 自己評価ループ: 同じ強さ帯で勝率を測り、外れたものの補正値を動かして再評価する
+var LOW = 0.4, HIGH = 0.6, MAX_PASS = 24, MATCHES = 700, out = [];
+function tierIds(t) { return TK.SPECIES.filter(function (s) { return s.tier === t; }).map(function (s) { return s.id; }); }
+function pick4(ids, r) {
+  var a = ids.slice(), o = [];
+  for (var i = 0; i < 4; i++) o.push(a.splice(Math.floor(r() * a.length), 1)[0]);
+  return o;
+}
+function league(ids, lv, seed, matches) {
+  var r = TK.rng(seed), win = {}, n = {};
+  ids.forEach(function (i) { win[i] = 0; n[i] = 0; });
+  for (var m = 0; m < matches; m++) {
+    var a = pick4(ids, r), b = pick4(ids, r);
+    var res = TK.simulate(a.map(function (i) { return TK.makeFoe(i, lv, 1); }), b.map(function (i) { return TK.makeFoe(i, lv, 1); }),
+      { seed: seed + m, tacticA: 'balance', tacticB: 'balance' });
+    a.forEach(function (i) { n[i]++; if (res.winner === 0) win[i]++; });
+    b.forEach(function (i) { n[i]++; if (res.winner === 1) win[i]++; });
+  }
+  var wr = {};
+  ids.forEach(function (i) { wr[i] = n[i] ? win[i] / n[i] : 0.5; });
+  return wr;
+}
+function tune() {
+  for (var i = 0; i < TK.SPECIES.length; i++) TK.PW[i] = TK.PW[i] || 1;
+  var log = [];
+  for (var t = 1; t <= 10; t++) {
+    var ids = tierIds(t), pass, outl = 0, spread = 0;
+    for (pass = 1; pass <= MAX_PASS; pass++) {
+      var wr = league(ids, [50, 30, 80][pass % 3], pass * 977 + t, ids.length * 30), vals = ids.map(function (i) { return wr[i]; });
+      outl = vals.filter(function (v) { return v < LOW || v > HIGH; }).length;
+      spread = Math.max.apply(null, vals) - Math.min.apply(null, vals);
+      if (outl === 0) break;
+      ids.forEach(function (i) {
+        TK.PW[i] = Math.min(1.45, Math.max(0.7, TK.PW[i] * (1 + 0.28 * (0.5 - wr[i]))));
+      });
+    }
+    log.push('tier' + t + ': pass=' + pass + ' outliers=' + outl + ' spread=' + spread.toFixed(3));
+  }
+  return log;
+}
+function verify() {
+  var lines = [];
+  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].forEach(function (t) {
+    var ids = tierIds(t);
+    [30, 50, 80].forEach(function (lv) {
+      var wr = league(ids, lv, 555 + lv * t, ids.length * 60), v = ids.map(function (i) { return wr[i]; }).sort();
+      var worst = ids.slice().sort(function (a, b) { return wr[a] - wr[b]; });
+      lines.push('verify tier' + t + ' lv' + lv + ' min=' + v[0].toFixed(2) + '(' + TK.SPECIES[worst[0]].name + ') max=' + v[v.length - 1].toFixed(2) + '(' + TK.SPECIES[worst[worst.length - 1]].name + ')');
+    });
+  });
+  return lines;
+}
+// 各個体に 同じ帯で上位の能力と下位の能力、耐性の強み弱みがあるか
+function identity() {
+  var bad = [], sig = {}, dupe = 0;
+  TK.SPECIES.forEach(function (s) {
+    var ids = tierIds(s.tier), hasHi = false, hasLo = false;
+    TK.STATS.forEach(function (st) {
+      var vals = ids.map(function (i) { return TK.SPECIES[i].shape[st]; }).sort(function (a, b) { return a - b; });
+      if (s.shape[st] >= vals[Math.floor(vals.length * 0.7)]) hasHi = true;
+      if (s.shape[st] <= vals[Math.floor(vals.length * 0.3)]) hasLo = true;
+    });
+    if (!hasHi || !hasLo) bad.push(s.name);
+    var key = s.tier + s.skillEls.join('') + s.role + s.trait;
+    if (sig[key]) { dupe++; bad.push('[同型]' + s.name); }
+    sig[key] = 1;
+  });
+  return ['identity: 強み弱みなし=' + bad.length + ' ' + bad.join(','), 'identity: 同じ帯で わざ属性+役割+とくせい が同じ組=' + dupe];
+}
+// 高レベルの3体に、育成中の子を1体まぜて歩く
+function bestParty(s) {
+  // 上限に余裕があるものを優先する
+  var score = function (m) { return m.lv + (m.lv >= 40 && m.lv < TK.levelCap(m) ? 25 : 0); };
+  var byLv = s.ranch.slice().sort(function (a, b) { return score(b) - score(a); }), seen = {}, team = [];
+  byLv.forEach(function (m) { if (team.length < 4 && !seen[m.sp]) { seen[m.sp] = 1; team.push(m.uid); } });
+  var kid = trainee(s);
+  if (kid && team.indexOf(kid.uid) < 0) { if (team.length >= 4) team.pop(); team.push(kid.uid); }
+  s.party = team;
+}
+function trainee(s) {
+  return s.ranch.filter(function (m) { return m.breed > 0 && m.lv < 45; }).sort(function (a, b) { return b.lv - a.lv; })[0];
+}
+function gearUp(s) {
+  var free = TK.bagList(s).sort(function (a, b) { return TK.QUALITY[b.it.q].mult * (b.it.lv + 3) - TK.QUALITY[a.it.q].mult * (a.it.lv + 3); });
+  TK.partyInsts(s).forEach(function (m) {
+    Object.keys(m.eq).forEach(function (slot) {
+      var cur = m.eq[slot] != null ? s.items[m.eq[slot]] : null;
+      var cand = free.filter(function (x) { return !x.by && x.it.slot === slot; })[0];
+      if (cand && (!cur || cand.it.lv * TK.QUALITY[cand.it.q].mult > cur.lv * TK.QUALITY[cur.q].mult)) { m.eq[slot] = cand.it.id; cand.by = m.uid; }
+    });
+  });
+}
+// 敵がレベル上限に近づいたら配合する。子が育つまで次はしない
+function autoBreed(s, r, area) {
+  if (TK.AREAS[area].lv < 40 || trainee(s)) return 0;
+  // 育てる枠が4体そろっていれば 新しい子は作らない
+  if (s.ranch.filter(function (m) { return m.breed > 0 && m.lv < TK.levelCap(m); }).length >= 4) return 0;
+  var cands = s.ranch.filter(function (m) { return m.lv >= TK.levelCap(m); }).sort(function (a, b) { return b.breed - a.breed || b.lv - a.lv; });
+  if (cands.length < 2) return 0;
+  var base = cands[0];
+  var other = cands.filter(function (c) { return c.sp !== base.sp && s.party.indexOf(c.uid) < 0; })[0] || cands.filter(function (c) { return c.sp !== base.sp; })[0];
+  if (!other) return 0;
+  // 受けつげる中で いちばん威力の高い攻撃を選ぶ
+  var heir = TK.inheritable(base, other).filter(function (id) { return TK.SKILLS[id].pow && TK.SKILLS[id].kind !== 'heal'; }).sort(function (x, y) { return TK.SKILLS[y].pow - TK.SKILLS[x].pow; })[0];
+  return TK.breed(s, base.uid, other.uid, r, heir) ? 1 : 0;
+}
+function playthrough(seed) {
+  var t0 = 1.7e12, H = 3600e3, now = t0, r = TK.rng(seed), s = TK.newState(Math.floor(r() * 3), now, seed), area = 0, wipeStreak = 0, breeds = 0;
+  var stats = TK.AREAS.map(function () { return { runs: 0, wipes: 0, lv: 0, front: 0, frontWipes: 0 }; }), runs = 0;
+  while (area < TK.AREAS.length && runs < 2500) {
+    TK.tickStamina(s.stamina, now);
+    if (s.stamina.n < 1) { now += 4 * H; continue; }
+    bestParty(s); gearUp(s);
+    breeds += autoBreed(s, r, area);
+    bestParty(s);
+    var buy = Math.min(8 - s.cookies, Math.floor(s.coins / TK.PRICE.cookie));
+    if (buy > 0) { s.coins -= buy * TK.PRICE.cookie; s.cookies += buy; }
+    // 適正レベル未満なら 前の場所で育ててから挑む
+    var top = TK.partyInsts(s).slice().sort(function (a, b) { return b.lv - a.lv; }).slice(0, 3);
+    var avgLv = top.reduce(function (a, m) { return a + m.lv; }, 0) / Math.max(1, top.length);
+    var floor = TK.floorsDone(s, area), ready = avgLv >= TK.floorLv(area, floor) - 2 && wipeStreak < 2;
+    var target = area, tf = floor;
+    if (!ready) {
+      if (floor > 0) tf = floor - 1;
+      else if (area > 0) { target = area - 1; tf = TK.FLOORS - 2; }
+    }
+    var frontier = target === area && tf === floor;
+    var run = TK.startRun(s, target, now, tf);
+    if (!run) { now += 4 * H; continue; }
+    runs++;
+    stats[target].runs++;
+    if (frontier) stats[area].front++;
+    while (!run.over && run.step < run.total) TK.nextStep(s, run, now);
+    if (run.wiped) { stats[target].wipes++; if (frontier) { wipeStreak++; stats[area].frontWipes++; } }
+    else if (!frontier) wipeStreak = Math.max(0, wipeStreak - 1);
+    if (run.floorCleared && frontier) wipeStreak = 0;
+    if (run.cleared && target === area && floor === TK.FLOORS - 1) {
+      stats[area].lv = TK.partyInsts(s).reduce(function (a, m) { return a + m.lv; }, 0) / s.party.length;
+      area++; wipeStreak = 0;
+    }
+    now += (runs % 3 === 0 ? 4 * H : 0);
+  }
+  return { area: area, runs: runs, days: (now - t0) / (24 * H), breeds: breeds, stats: stats, owned: Object.keys(s.owned).length };
+}
+// ボットの進行を見て、詰まる場所は敵を弱く、素通りする場所は敵を強くする
+function smooth() {
+  TK.AREA_ADJ = TK.AREA_ADJ || [];
+  for (var a = 0; a < TK.AREAS.length; a++) TK.AREA_ADJ[a] = TK.AREA_ADJ[a] || 1;
+  for (var pass = 0; pass < 14; pass++) {
+    var res = [];
+    for (var i = 0; i < 8; i++) res.push(playthrough(3000 + pass * 50 + i));
+    TK.AREAS.forEach(function (x, k) {
+      if (k < 4) return;
+      var runs = res.reduce(function (t, r) { return t + r.stats[k].front; }, 0), wipes = res.reduce(function (t, r) { return t + r.stats[k].frontWipes; }, 0);
+      var rate = wipes / Math.max(1, runs);
+      if (rate > 0.33) TK.AREA_ADJ[k] = Math.max(0.6, TK.AREA_ADJ[k] * 0.97);
+      else if (rate < 0.15) TK.AREA_ADJ[k] = Math.min(1.25, TK.AREA_ADJ[k] * 1.02);
+    });
+  }
+}
+// 買い物も編成変更もしない 新規プレイヤー。最初の20回で何か所進めるかを測る
+function fresh() {
+  var lines = [], N = 300;
+  [0, 1, 2].forEach(function (st) {
+    var first = 0, in3 = 0, wipes = 0, runsAll = 0, areas = 0;
+    for (var i = 0; i < N; i++) {
+      var s = TK.newState(st, 1.7e12, 7000 + i * 13 + st), area = 0, tries = 0;
+      while (s.stamina.n > 0 && area < TK.AREAS.length) {
+        var fl = TK.floorsDone(s, area), run = TK.startRun(s, area, 1.7e12 + runsAll * 1000, fl);
+        runsAll++;
+        while (!run.over && run.step < run.total) TK.nextStep(s, run, 1.7e12);
+        if (run.wiped) wipes++;
+        if (area === 0) {
+          tries++;
+          if (tries === 1 && run.floorCleared) first++;
+          if (run.cleared && tries <= 8) in3++;
+        }
+        if (run.cleared) area++;
+      }
+      areas += area;
+    }
+    lines.push('fresh ' + TK.SPECIES[st].name + ' 1層初回=' + (100 * first / N).toFixed(0) + '% A1を8回以内=' + (100 * in3 / N).toFixed(0) + '% 全滅率=' + (100 * wipes / runsAll).toFixed(0) + '% 20回で進む場所=' + (areas / N).toFixed(1));
+  });
+  return lines;
+}
+function campaign() {
+  var N = 12, res = [], lines = [];
+  for (var i = 0; i < N; i++) res.push(playthrough(1000 + i));
+  var avg = function (f) { return res.reduce(function (a, x) { return a + f(x); }, 0) / N; };
+  lines.push('campaign clear=' + res.filter(function (x) { return x.area === TK.AREAS.length; }).length + '/' + N + ' runs=' + avg(function (x) { return x.runs; }).toFixed(0) +
+    ' days=' + avg(function (x) { return x.days; }).toFixed(1) + ' breeds=' + avg(function (x) { return x.breeds; }).toFixed(1) + ' owned=' + avg(function (x) { return x.owned; }).toFixed(0));
+  TK.AREAS.forEach(function (a, i) {
+    lines.push(('A' + (i + 1)) + ' foeLv' + a.lv + ' runs=' + avg(function (x) { return x.stats[i].runs; }).toFixed(1) + ' wipe%=' + (100 * avg(function (x) { return x.stats[i].wipes; }) / Math.max(0.01, avg(function (x) { return x.stats[i].runs; }))).toFixed(0) +
+      ' partyLv=' + avg(function (x) { return x.stats[i].lv; }).toFixed(1));
+  });
+  return lines;
+}
+var q = location.search;
+var t = Date.now();
+if (q.indexOf('tune') >= 0) { out = out.concat(tune()).concat(verify()).concat(identity()); smooth(); }
+out = out.concat(fresh()).concat(campaign());
+out.push('ms=' + (Date.now() - t));
+if (q.indexOf('tune') >= 0) {
+  out.push('ADJ=' + JSON.stringify(TK.AREA_ADJ.map(function (v) { return Math.round(v * 1000) / 1000; })));
+  out.push('PW=' + JSON.stringify(TK.PW.map(function (v) { return Math.round(v * 1000) / 1000; })));
+}
+document.getElementById('out').textContent = out.join('\n');
+</script>

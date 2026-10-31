@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>narrow</title>
+<style>body{margin:0;display:flex;gap:10px;background:#333}iframe{border:0;flex:none}</style>
+<pre id="out" hidden></pre>
+<script>
+// 375px幅で各画面を開き、横にはみ出す要素がないか測る
+var shots = ['map', 'stage', 'mon', 'mix', 'dex', 'dict', 'bag', 'help', 'dexm'], lines = [], left = shots.length;
+var only = (location.search.match(/only=(\w+)/) || [])[1];
+(only ? [only] : shots).forEach(function (s) {
+  var f = document.createElement('iframe');
+  f.width = 375; f.height = 800; f.src = 'shot.html?shot=' + s;
+  f.onload = function () {
+    setTimeout(function () {
+      var d = f.contentDocument, w = d.documentElement;
+      var clipped = Array.from(d.querySelectorAll('.res small, .res b')).filter(function (e) { return e.scrollWidth > e.parentNode.clientWidth; }).length;
+      var wide = Array.from(d.querySelectorAll('#app *')).filter(function (e) {
+        var r = e.getBoundingClientRect();
+        return r.width > 0 && r.right > 376 && !e.closest('.tblw') && !e.closest('.stage') && !e.closest('svg');
+      }).slice(0, 3).map(function (e) { return e.tagName + '.' + e.className; });
+      lines.push((w.scrollWidth <= 375 && !clipped ? 'PASS ' : 'FAIL ') + s + ' scrollWidth=' + w.scrollWidth + ' resistOverflow=' + clipped + ' ' + wide.join(' ') + ' ' + d.getElementById('errs').textContent);
+      if (--left === 0 || only) document.getElementById('out').textContent = lines.join('\n');
+    }, 1500);
+  };
+  document.body.appendChild(f);
+});
+</script>

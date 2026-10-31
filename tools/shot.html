@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>shot</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Zen+Maru+Gothic:wght@500;700;900&display=swap">
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div id="app"></div>
+<div id="modal" class="modal" hidden></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div><pre id="out" hidden></pre>
+<pre id="errs" style="position:fixed;left:0;top:0;background:#fff;color:red;z-index:99;margin:0;font-size:12px"></pre>
+<script>window.onerror = function (m, f, l) { document.getElementById('errs').textContent += m + ' @' + l + '\n'; };
+window.onunhandledrejection = function (e) { document.getElementById('errs').textContent += 'rej ' + (e.reason && e.reason.stack) + '\n'; };</script>
+<script src="../js/data-rules.js"></script>
+<script src="../js/data-creatures.js"></script>
+<script src="../js/balance-tuned.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/art.js"></script>
+<script src="../js/ui.js"></script>
+<script src="smoke.js"></script>
+<script>
+// 確認用: 途中まで進めたセーブを作って各画面を開く
+(function () {
+  var shot = (location.search.match(/shot=(\w+)/) || [])[1];
+  if (shot === 'title') return;
+  var now = Date.now(), r = TK.rng(7), s = TK.newState(1, now, 7);
+  for (var i = 0; i < 7; i++) { s.cleared[i] = true; s.floors[i] = TK.FLOORS; }
+  [9, 14, 18, 22, 29, 36, 40, 44].forEach(function (id) { TK.addCreature(s, id, 50, r); });
+  s.party = s.ranch.slice(2, 6).map(function (m) { return m.uid; });
+  TK.SPECIES.forEach(function (x, i) { if (i % 3 !== 2) s.seen[i] = 1; if (i % 3 === 0 && !x.boss) s.owned[i] = 1; });
+  s.ranch.forEach(function (m) { m.lv = Math.max(m.lv, 50); });
+  for (i = 0; i < 6; i++) TK.makeItem(s, 30, r);
+  TK.debug.state = s;
+  TK.debug.shell();
+  if (shot === 'map') return;
+  if (shot === 'smoke') { smoke(s); return; }
+  if (shot === 'stage') { s.speed = 4; TK.debug.startRun(6); return; }
+  if (shot === 'dexm') { TK.debug.go('dex'); TK.debug.dexEntry(15); return; }
+  TK.debug.go({ mon: 'mon', dex: 'dex', dict: 'dict', mix: 'mix', bag: 'bag', help: 'help' }[shot]);
+})();
+</script>
+</body>
+</html>

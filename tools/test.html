@@ -1,0 +1,302 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>tests</title>
+<pre id="out"></pre>
+<script>window.onerror = function (m, f, l) { document.getElementById('out').textContent += 'FAIL script error ' + m + ' @' + l + '\n'; };</script>
+<script src="../js/data-rules.js"></script>
+<script src="../js/data-creatures.js"></script>
+<script src="../js/balance-tuned.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/art.js"></script>
+<script>
+var lines = [], fails = 0;
+function ok(c, msg) { lines.push((c ? 'PASS ' : 'FAIL ') + msg); if (!c) fails++; document.getElementById('out').textContent = 'RUNNING\n' + lines.join('\n'); }
+function near(a, b, tol) { return Math.abs(a - b) <= tol; }
+function run() {
+  ok(TK.SPECIES.length === 400, 'creatures = 400 (' + TK.SPECIES.length + ')');
+  ok(new Set(TK.SPECIES.map(function (s) { return s.name; })).size === 400, 'names unique');
+  ok(TK.AREAS.length === 40, 'areas = 40');
+  ok(TK.AREAS.every(function (a) { return a.bg && TK.sceneLayers(a.bg).sky; }), 'every area has a scene');
+  ok(TK.AREAS.every(function (a) { return TK.floorLv(a.id, 4) + 2 <= 100; }), 'foes stay within the level cap');
+  ok(TK.AREAS.every(function (a) { return a.regulars.length >= 9 && TK.SPECIES[a.boss].boss; }), 'each area has inhabitants and a boss');
+  ok(TK.SPECIES.every(function (s) { return s.el === undefined && s.legend === undefined; }), 'creatures have no element and no legendary flag');
+  ok(!/でんせつ|伝説/.test(TK.CREATURE_ROWS + TK.EXTRA_ROWS), 'no legendary wording in creature data');
+  var uniq = new Set(TK.SPECIES.map(function (s) { return TK.creatureSvg(s.id); })).size;
+  ok(uniq === 400, 'every creature has distinct art (' + uniq + ')');
+  ok(TK.SPECIES.filter(function (s) { return s.boss; }).every(function (s) { return TK.creatureSvg(s.id).indexOf('#ffd23f" stroke="#232b52" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/><circle') < 0; }), 'bosses wear no crown');
+  var kinds = {};
+  TK.SPECIES.forEach(function (s) { TK.kitOf(s.id).forEach(function (k) { var id = TK.skillId(s.id, k[1]); if (!TK.SKILLS[id]) ok(false, 'bad skill ' + id); kinds[TK.SKILLS[id].el ? 'el' : 'plain'] = 1; }); });
+  ok(kinds.el && kinds.plain, 'skills include elemental and plain ones');
+  var skillNames = Object.keys(TK.SKILLS).map(function (id) { return TK.SKILLS[id].name; }), reach = {};
+  ok(skillNames.length >= 120 && new Set(skillNames).size === skillNames.length, 'at least 120 skills with unique names (' + skillNames.length + ')');
+  TK.SPECIES.forEach(function (s) { TK.kitSkills(s.id).forEach(function (id) { reach[id] = 1; }); });
+  var unreach = Object.keys(TK.SKILLS).filter(function (id) { return !reach[id]; });
+  ok(!unreach.length, 'every skill is learned by some creature ' + unreach.join(','));
+  ok(TK.SPECIES.every(function (s) { var k = TK.kitSkills(s.id); return new Set(k).size === k.length; }), 'no creature learns the same skill twice');
+  ok(new Set(TK.SPECIES.map(function (s) { return TK.kitSkills(s.id).join(); })).size >= 200, 'skill sets vary between creatures');
+  ok(!TK.ITEM_FX.join, 'no recruit bonus on gear');
+  ok(TK.PRICE.ranchMax === 500, 'ranch holds 500');
+  var HARD = /[闇違稲噂影鋭宴炎煙猿奥鎧核殻獲滑鎌冠祈輝騎亀蟻詰丘巨峡狐鼓駆掘鯨撃嫌肩賢鍵幻坑攻甲咲傘刺獅蛇珠瞬巡晶触寝尽吹跡掃霜苔鷹誰鍛弾遅挑蝶跳沈蔦帝吐途怒凍塔踏逃騰突猫悩漠爆肌盤疲尾匹姫漂浜浮譜舞噴壁崩泡胞蜂吠魔埋慢眠霧揺溶踊翼雷嵐粒竜龍療鱗鈴廊狼腕巫棘蟲隕]/;
+  var longNames = TK.SPECIES.filter(function (s) { return s.name.length > 6; }).map(function (s) { return s.name; });
+  ok(!longNames.length, 'names are 6 chars or less ' + longNames.join(','));
+  var hardNames = TK.SPECIES.filter(function (s) { return HARD.test(s.name); }).map(function (s) { return s.name; });
+  ok(!hardNames.length, 'names use elementary kanji only ' + hardNames.join(','));
+  var hardText = TK.SPECIES.filter(function (s) { return HARD.test(s.desc); }).map(function (s) { return s.desc; }).concat(TK.AREAS.filter(function (a) { return HARD.test(a.name + a.desc); }).map(function (a) { return a.name; }));
+  ok(!hardText.length, 'descriptions use elementary kanji only ' + hardText.slice(0, 5).join(','));
+  ok(!/モンスター/.test(TK.CREATURE_ROWS + TK.AREA_ROWS), 'no モンスター wording');
+  TK.SPECIES.forEach(function (s) {
+    var bad = !TK.ROLES[s.role] || !TK.TRAITS[s.trait] || TK.ELEMENTS.indexOf(s.theme) < 0 || !s.desc || !s.body;
+    if (bad) ok(false, 'bad row ' + s.name);
+    var sum = s.res.reduce(function (a, b) { return a + b - 2; }, 0);
+    if (sum !== 0 || !s.res.some(function (v) { return v < 2; }) || !s.res.some(function (v) { return v > 2; })) ok(false, 'resist ' + s.name);
+  });
+  var mults = TK.RES_STEPS.map(function (x) { return x.mult; });
+  ok(mults[0] === 1 / 3 && mults[1] === .5 && mults[2] === 1 && mults[3] === 2 && mults[4] === 3, 'resist multipliers');
+
+  var r = TK.rng(5), t0 = 1e12, H = 3600e3;
+  var st = { n: 20, t: t0 };
+  TK.tickStamina(st, t0 + 3.9 * H); ok(st.n === 20, 'no stamina before 4h');
+  TK.tickStamina(st, t0 + 4 * H); ok(st.n === 21, 'stamina +1 at 4h');
+  TK.tickStamina(st, t0 + 8 * H + 1); ok(st.n === 22, 'stamina no double count');
+  TK.tickStamina(st, t0 + 4000 * H); ok(st.n === 100, 'stamina caps at 100');
+  var s = TK.newState(0, t0, 42);
+  ok(s.stamina.n === 20, 'initial stamina 20');
+
+  var a = TK.newInst(0, 50, r, 1), b = TK.newInst(1, 50, r, 2), c = TK.newInst(0, 50, r, 3), low = TK.newInst(1, 49, r, 4);
+  ok(TK.levelCap(a) === 50, 'cap 50');
+  ok(!TK.canBreed(a, c).ok, 'same species blocked');
+  ok(!TK.canBreed(a, low).ok, 'below cap blocked');
+  ok(TK.canBreed(a, b).ok, 'cap pair allowed');
+  var x = TK.newInst(2, 50, r, 5);
+  for (var i = 0; i < 8; i++) { x.lv = TK.levelCap(x); TK.applyBreed(x, r); }
+  ok(TK.levelCap(x) === 100, 'cap maxes at 100 after many breeds');
+  var up = 0, flat = 0, resHit = 0, n = 30000, dropped = 0;
+  for (i = 0; i < n; i++) {
+    var y = TK.newInst(3, 50, r, 9);
+    TK.STATS.forEach(function (k) { y.g[k] = 1; }); y.g.hp = 0; y.g.spd = 2;
+    var res = TK.applyBreed(y, r);
+    if (y.g.atk === 2) up++; else flat++;
+    if (res.resist !== null) resHit++;
+    if (y.g.spd !== 2) dropped++;
+  }
+  ok(near(up / n, 1 / 3, .015), 'growth up ~1/3 (' + (up / n).toFixed(3) + ')');
+  ok(near(resHit / n, .5, .015), 'resist up ~50% (' + (resHit / n).toFixed(3) + ')');
+  ok(dropped === 0, 'growth never falls');
+  var bs = TK.newState(0, t0, 3), p1 = TK.addCreature(bs, 8, 50, r), p2 = TK.addCreature(bs, 9, 50, r);
+  bs.party = [p1.uid, p2.uid]; p1.g.atk = 2; p1.resUp[3] = 1;
+  var br = TK.breed(bs, p1.uid, p2.uid, r), kid = br.child;
+  ok(!TK.findInst(bs, p1.uid) && !TK.findInst(bs, p2.uid), 'both parents leave');
+  ok(TK.findInst(bs, kid.uid) && kid.sp === 8 && kid.lv === TK.CHILD_LV, 'child is chosen species');
+  ok(TK.levelCap(kid) === 60 && kid.g.atk === 2 && kid.resUp[3] >= 1, 'child inherits cap, growth, resist');
+  ok(bs.party.length === 1 && bs.party[0] === kid.uid, 'child takes the party slot');
+  var z = TK.newInst(4, 50, r, 9); z.resUp[0] = 9;
+  ok(TK.resistSteps(z)[0] === 0, 'resist clamps at とても強い');
+
+  var A = [0, 1, 2, 3].map(function (i) { return TK.makeFoe(i, 30, 1); }), B = [12, 13, 14, 15].map(function (i) { return TK.makeFoe(i, 30, 1); });
+  var r1 = TK.simulate(A, B, { seed: 99 }), r2 = TK.simulate(A, B, { seed: 99 });
+  ok(JSON.stringify(r1) === JSON.stringify(r2), 'battle deterministic');
+
+  // 耐性倍率が実際にダメージへ効くこと
+  var dm = TK.RES_STEPS.map(function (_, step) {
+    var atk = TK.makeFoe(0, 30, 1), tgt = TK.makeFoe(1, 30, 1);
+    atk.skills = ['fire1']; tgt.hp = 99999; tgt.trait = 'lucky'; atk.trait = 'lucky'; tgt.res = [step, 2, 2, 2, 2, 2, 2];
+    var total = 0;
+    for (var q = 0; q < 300; q++) {
+      TK.simulate([atk], [tgt], { seed: q, maxRounds: 1, tacticA: 'ganga' }).events.forEach(function (e) { if (e.e === 'hit' && e.u === 0 && !e.crit) total += e.d; });
+    }
+    return total;
+  });
+  ok(near(dm[2] / dm[0], 3, .25) && near(dm[2] / dm[1], 2, .2) && near(dm[3] / dm[2], 2, .2) && near(dm[4] / dm[2], 3, .25), 'resist affects damage ' + dm.join(','));
+
+  [0, 1, 2].forEach(function (st) {
+    var won = 0, whole = 0, N = 300;
+    for (var q = 0; q < N; q++) {
+      var fs = TK.newState(st, t0, 9000 + q * 7 + st), run1 = TK.startRun(fs, 0, t0);
+      while (!run1.over && run1.step < run1.total) TK.nextStep(fs, run1, t0);
+      if (run1.floorCleared) won++;
+      for (var tries = 1; tries < 8 && !fs.cleared[0]; tries++) {
+        var r2 = TK.startRun(fs, 0, t0, TK.floorsDone(fs, 0));
+        while (!r2.over && r2.step < r2.total) TK.nextStep(fs, r2, t0);
+      }
+      if (fs.cleared[0]) whole++;
+    }
+    ok(won / N >= 0.9, 'first run of floor 1 clears >=90%: ' + TK.SPECIES[st].name + ' ' + (100 * won / N).toFixed(0) + '%');
+    ok(whole / N >= 0.9, 'area 1 clears within 8 runs >=90%: ' + TK.SPECIES[st].name + ' ' + (100 * whole / N).toFixed(0) + '%');
+  });
+
+  var ws = TK.newState(0, t0, 55), wr = TK.startRun(ws, 19, t0), coinsBefore = ws.coins, ranchBefore = ws.ranch.length, itemsBefore = Object.keys(ws.items).length;
+  while (!wr.over && wr.step < wr.total) TK.nextStep(ws, wr, t0);
+  ok(wr.wiped, 'test party wipes in the last area');
+  ok(ws.coins === coinsBefore + wr.coins && ws.ranch.length >= ranchBefore && Object.keys(ws.items).length >= itemsBefore, 'a wipe loses nothing');
+
+  serverTests().then(done).catch(function (e) { ok(false, 'EXCEPTION ' + e.stack); done(); });
+}
+async function serverTests() {
+  var t = 1.7e12, clock = function () { return t; };
+  // れんきん
+  var al = TK.newState(0, t, 77), rr = TK.rng(5);
+  var put = function (slot, q, el, elv) {
+    var base = TK.ITEM_BASE[slot][0], it = TK.makeItem(al, 20, rr, q);
+    it.slot = slot; it.el = el; it.elv = elv; it.bonus = {}; it.bonus[base[1]] = 5;
+    return it;
+  };
+  for (var n = 0; n < 200; n++) {
+    var x1 = put('weapon', 2, 'fire', 7), x2 = put('weapon', 2, 'fire', 4), made = TK.alchemy(al, x1.id, x2.id, rr);
+    if (made.el !== 'fire' || made.elv <= 7 || made.q !== 2 || made.slot !== 'weapon') ok(false, 'alchemy same all');
+    if (al.items[x1.id] || al.items[x2.id]) ok(false, 'alchemy consumes materials');
+    var y1 = put('armor', 1, 'water', 3), y2 = put('acc', 3, 'dark', 5), mix2 = TK.alchemy(al, y1.id, y2.id, rr);
+    if ([1, 3].indexOf(mix2.q) < 0 || ['armor', 'acc'].indexOf(mix2.slot) < 0 || ['water', 'dark'].indexOf(mix2.el) < 0) ok(false, 'alchemy picks from materials');
+    if (mix2.bonus[Object.keys(mix2.bonus)[0]] < 1 || !TK.ITEM_BASE[mix2.slot].some(function (b) { return mix2.bonus[b[1]] !== undefined; })) ok(false, 'alchemy stat fits slot');
+  }
+  ok(true, 'alchemy recipes hold over 200 runs');
+  var w1 = put('weapon', 1, 'fire', 5), w2 = put('weapon', 1, 'fire', 5), wm = TK.newInst(0, 30, rr, 500);
+  wm.eq.weapon = w1.id; al.ranch.push(wm);
+  ok(TK.alchemy(al, w1.id, w2.id, rr) === null && al.items[w2.id], 'worn item cannot be a material');
+  var plain1 = put('armor', 1, null, 0), plain2 = put('armor', 1, null, 0), pm = TK.alchemy(al, plain1.id, plain2.id, rr);
+  ok(pm.el === null && pm.elv === 0, 'no element stays no element');
+  var named = put('weapon', 2, 'fire', 3); named.base = 'こんぼう';
+  ok(TK.itemName(named) === 'よいできのあかいこんぼう', 'item name: ' + TK.itemName(named));
+  var prefixOk = { fire: 'あかい', water: 'あおい', wind: 'みどりの', earth: 'ちゃいろい', thunder: 'きいろい', light: 'きんの', dark: 'くろい' };
+  ok(TK.ELEMENTS.every(function (e) { named.el = e; return TK.itemName(named) === 'よいできの' + prefixOk[e] + 'こんぼう'; }), 'all seven prefixes');
+  named.el = null;
+  ok(TK.itemName(named) === 'よいできのこんぼう', 'no element has no prefix');
+  var ns = TK.newState(0, t, 8), r8 = TK.rng(8), madeEl = null;
+  for (var m8 = 0; m8 < 40 && !madeEl; m8++) { var c8 = TK.makeItem(ns, 20, r8); if (c8.el) madeEl = c8; }
+  ok(madeEl.name.indexOf(TK.EL_PREFIX[madeEl.el]) >= 0, 'new items carry the prefix');
+  var open0 = TK.newState(0, t, 3);
+  ok(!TK.alchemyOpen(open0), 'alchemy starts closed');
+  open0.cleared[0] = true;
+  ok(TK.alchemyOpen(open0), 'clearing area 1 opens alchemy');
+
+  // 属性値がダメージに効く
+  var hit = function (elp) {
+    var atk = TK.makeFoe(0, 30, 1), tgt = TK.makeFoe(1, 30, 1), total = 0;
+    atk.skills = ['fire1']; atk.trait = tgt.trait = 'lucky'; tgt.hp = 99999; tgt.res = [2, 2, 2, 2, 2, 2, 2]; atk.elp = elp;
+    for (var q2 = 0; q2 < 200; q2++) TK.simulate([atk], [tgt], { seed: q2, maxRounds: 1, tacticA: 'ganga' }).events.forEach(function (e) { if (e.e === 'hit' && e.u === 0 && !e.crit) total += e.d; });
+    return total;
+  };
+  ok(near(hit({ fire: 50 }) / hit({}), 1.5, .08), 'element power boosts matching skills');
+  ok(near(hit({ water: 50 }) / hit({}), 1, .01), 'element power ignores other elements');
+  var wm2 = TK.newInst(0, 30, rr, 501), i1 = put('weapon', 1, 'fire', 50), i2 = put('armor', 1, 'fire', 50);
+  wm2.eq.weapon = i1.id; wm2.eq.armor = i2.id;
+  ok(TK.elPower(wm2, al.items).fire === TK.EL_POWER_MAX, 'element power is capped');
+
+  // 二重保存とクラウド
+  var sv = TK.newState(0, t, 5);
+  localStorage.removeItem(TK.SAVE_KEY);
+  TK.save(sv);
+  await new Promise(function (res) { setTimeout(res, 120); });
+  localStorage.removeItem(TK.SAVE_KEY);
+  var back = await TK.loadBest();
+  ok(back && back.seed === 5, 'save survives localStorage loss via IndexedDB');
+  TK.save(sv);
+  await new Promise(function (res) { setTimeout(res, 120); });
+  await TK.wipe();
+  ok((await TK.loadBest()) === null, 'manual wipe clears both stores');
+  var old = TK.newState(0, t, 6), oldIt = TK.makeItem(old, 20, TK.rng(1)); oldIt.el = 'dark'; oldIt.elv = 3; oldIt.name = oldIt.base;
+  localStorage.setItem(TK.SAVE_KEY, JSON.stringify(old));
+  ok(TK.load().items[oldIt.id].name.indexOf('くろい') >= 0, 'old items are renamed on load');
+  localStorage.removeItem(TK.SAVE_KEY);
+  ok(!TK.validSave({ v: 2, ranch: [{ sp: 9999 }], party: [], items: {}, stamina: {} }), 'broken save rejected');
+  ok(!TK.validSave({ v: 1 }), 'old save rejected');
+
+  // 層とぬし
+  var fl = TK.newState(0, t, 11), flR = TK.rng(3);
+  ok(TK.startRun(fl, 0, t, 1) === null, 'floor 2 locked at start');
+  ok(TK.floorsDone(fl, 0) === 0 && !fl.cleared[0], 'nothing cleared at start');
+  var strong = TK.addCreature(fl, 10, 50, flR), strong2 = TK.addCreature(fl, 12, 50, flR);
+  fl.party = [strong.uid, strong2.uid];
+  fl.stamina.n = 100;
+  for (var ff = 0; ff < TK.FLOORS; ff++) {
+    var fr = TK.startRun(fl, 0, t, ff);
+    if (!fr) { ok(false, 'floor ' + ff + ' should be open'); break; }
+    var bossSeen = false, stepR;
+    while (!fr.over && fr.step < fr.total) { stepR = TK.nextStep(fl, fr, t); if (stepR.type === 'boss') bossSeen = true; }
+    ok(fr.floorCleared, 'floor cleared ' + (ff + 1));
+    ok(bossSeen === (ff === TK.FLOORS - 1), 'boss only on floor 5, floor ' + (ff + 1));
+    ok(!!fl.cleared[0] === (ff === TK.FLOORS - 1), 'area clears only after floor 5, floor ' + (ff + 1));
+  }
+  ok(TK.areaOpen(fl, 1), 'next area opens');
+  var bossId = TK.AREAS[0].boss, never = true, bs = TK.newState(0, t, 12);
+  var bossMan = TK.addCreature(bs, 10, 60, flR); bs.party = [bossMan.uid]; bs.floors[0] = 4; bs.stamina.n = 100;
+  for (var bi = 0; bi < 80; bi++) {
+    var br2 = TK.startRun(bs, 0, t + bi, 4);
+    while (!br2.over && br2.step < br2.total) TK.nextStep(bs, br2, t);
+    bs.stamina.n = 100;
+  }
+  ok(!bs.owned[bossId] && !bs.ranch.some(function (m) { return TK.SPECIES[m.sp].boss; }), 'bosses never join from the boss fight');
+  // 配合で受けつぐ とくぎ
+  var hs = TK.newState(0, t, 21), ha = TK.addCreature(hs, 0, 50, flR), hb = TK.addCreature(hs, TK.SPECIES.filter(function (x) { return x.role === 'mage'; })[0].id, 50, flR);
+  var hList = TK.inheritable(ha, hb), hPick = hList[0], hOwn = TK.kitSkills(ha.sp);
+  ok(hList.length > 0 && hList.every(function (id) { return hOwn.indexOf(id) < 0 && TK.knownSkills(hb.sp, hb.lv).indexOf(id) >= 0; }), 'only skills the other parent knows can be inherited');
+  var hr = TK.breed(hs, ha.uid, hb.uid, flR, hPick);
+  ok(hr.learned === hPick && hr.child.learned[0] === hPick && TK.toFighter(hr.child).skills.indexOf(hPick) >= 0, 'child uses the inherited skill at Lv1');
+  var hc = { sp: 0, lv: 1, learned: TK.SKILLS ? Object.keys(TK.SKILLS).filter(function (id) { return hOwn.indexOf(id) < 0; }).slice(0, TK.SKILL_MAX - hOwn.length) : [] };
+  ok(hOwn.length + hc.learned.length === TK.SKILL_MAX && TK.inheritable(hc, hb).length === 0, 'skills stop at 12');
+  var hs2 = TK.newState(0, t, 22), hd = TK.addCreature(hs2, 0, 50, flR), he = TK.addCreature(hs2, 7, 50, flR);
+  ok(TK.breed(hs2, hd.uid, he.uid, flR, 'zzz').learned === null, 'unknown skill is refused');
+  ok(Object.keys(TK.SKILLS).every(function (id) { return TK.skillDesc(id).length > 4; }), 'every skill has a description');
+  // まきばの数と 追加効果
+  var rs = TK.newState(0, t, 23);
+  ok(TK.ranchCount(rs) === 0 && rs.ranch.length === 2, 'party is not counted in the ranch');
+  ok(rs.cookies === 3, 'three snacks at start');
+  var fxs = TK.newState(0, t, 24), fxm = TK.partyInsts(fxs)[0], fxi = TK.makeItem(fxs, 10, flR, 4);
+  ok(fxi.fx.length >= 2, 'best quality has extra effects'); fxi.fx = [{ k: 'coin', v: 50 }, { k: 'xp', v: 20 }]; fxm.eq[fxi.slot] = fxi.id;
+  var fxj = TK.makeItem(fxs, 10, flR, 0); fxj.slot = fxi.slot === 'acc' ? 'armor' : 'acc'; fxj.fx = [{ k: 'coin', v: 50 }]; fxm.eq[fxj.slot] = fxj.id;
+  ok(TK.partyFx(fxs).coin === TK.FX_MAX && TK.partyFx(fxs).xp === 20, 'extra effects add up to a cap');
+  // 追加効果のある とくぎ
+  var tf = function () { var f = TK.makeFoe(0, 50, 1); f.mp = 999; f.trait = 'none'; return f; };
+  var drainA = tf(), drainB = tf(); drainA.skills = ['fireC']; drainA.curHp = 1; drainB.res = [2, 2, 2, 2, 2, 2, 2];
+  var drainR = TK.simulate([drainA], [drainB], { seed: 5, tacticA: 'ganga', tacticB: 'ganga', maxRounds: 1 });
+  ok(drainR.events.some(function (e) { return e.e === 'heal' && e.t === 0; }), 'drain skill heals the user');
+  var recA = tf(), recB = tf(); recA.skills = ['fireB']; recB.skills = ['basic'];
+  var recR = TK.simulate([recA], [recB], { seed: 6, tacticA: 'ganga', tacticB: 'ganga', maxRounds: 1 });
+  ok(recR.events.some(function (e) { return e.e === 'hit' && e.u === 0 && e.t === 0; }), 'recoil skill hurts the user');
+  var lowA = tf(), lowB = tf(); lowA.skills = ['fire8']; lowB.skills = ['basic'];
+  ok(TK.simulate([lowA], [lowB], { seed: 7, tacticA: 'ganga', tacticB: 'ganga', maxRounds: 1 }).events.some(function (e) { return e.e === 'buff' && !e.up; }), 'lower skill reduces defense');
+  var oldFx = TK.newState(0, t, 25), oldIt = TK.makeItem(oldFx, 10, flR, 0); oldIt.fx = [{ k: 'join', v: 30 }, { k: 'coin', v: 10 }];
+  ok(TK.migrateSave(oldFx).items[oldIt.id].fx.length === 1, 'removed gear effect is cleared from old saves');
+  // 歩いているぬし
+  var lastA = TK.AREAS.length - 1;
+  ok(TK.wanderers(bs, 0).length === 0, 'first area has no wandering boss');
+  ok(TK.AREAS.every(function (a) { return a.id === 0 || TK.wanderers({ cleared: {} }, a.id)[0] === TK.AREAS[a.id - 1].boss; }), 'each boss wanders into the next area');
+  ok(TK.wanderers({ cleared: {} }, lastA).indexOf(TK.AREAS[lastA].boss) < 0, 'last boss hidden before the last clear');
+  var lastC = {}; lastC[lastA] = true;
+  ok(TK.wanderers({ cleared: lastC }, lastA).indexOf(TK.AREAS[lastA].boss) >= 0, 'last boss wanders its own area after clear');
+  var ws = TK.newState(0, t, 13), wm = TK.addCreature(ws, 10, 60, flR), wb = TK.AREAS[0].boss;
+  ws.party = [wm.uid]; ws.cleared[0] = true; ws.floors[0] = TK.FLOORS; ws.floors[1] = 3;
+  var wRuns = 0;
+  for (; wRuns < 400 && !ws.owned[wb]; wRuns++) {
+    ws.stamina.n = 100;
+    var wr = TK.startRun(ws, 1, t + wRuns, 3);
+    while (!wr.over && wr.step < wr.total) TK.nextStep(ws, wr, t);
+    wr = null;
+  }
+  ok(!!ws.owned[wb] && ws.ranch.some(function (m) { return m.sp === wb; }), 'wandering boss can join, runs=' + wRuns);  var oldSave = { v: 2, ranch: bs.ranch, party: bs.party, items: {}, stamina: { n: 5, t: t }, cleared: { 0: true, 1: true }, seen: {}, owned: {} };
+  localStorage.setItem(TK.SAVE_KEY, JSON.stringify(oldSave));
+  var mig = TK.load();
+  ok(mig.v === 3 && mig.floors[0] === TK.FLOORS && mig.floors[1] === TK.FLOORS && TK.areaOpen(mig, 2), 'old saves keep cleared areas');
+  localStorage.removeItem(TK.SAVE_KEY);
+
+  // おみせ
+  var sh = TK.newState(0, t, 21);
+  ok(sh.shop.length === TK.SHOP_SIZE, 'shop has stock at start');
+  var firstStock = JSON.stringify(sh.shop.map(function (i) { return i.name; })), itemCount = Object.keys(sh.items).length;
+  ok(itemCount === 0, 'shop stock is not in the bag');
+  TK.startRun(sh, 0, t + 5);
+  ok(sh.shop.length === TK.SHOP_SIZE && JSON.stringify(sh.shop.map(function (i) { return i.name; })) !== firstStock, 'stock changes each adventure');
+  var ware = sh.shop[0], price = TK.buyPrice(ware);
+  sh.coins = 0;
+  ok(TK.buyItem(sh, ware.id) === null && sh.shop.length === TK.SHOP_SIZE, 'cannot buy without coins');
+  sh.coins = price + 5;
+  ok(TK.buyItem(sh, ware.id) && sh.items[ware.id] && sh.coins === 5 && sh.shop.length === TK.SHOP_SIZE - 1, 'buying moves item to the bag');
+  var noShop = TK.newState(0, t, 22); delete noShop.shop;
+  ok(TK.migrateSave(noShop).shop.length === TK.SHOP_SIZE, 'old saves get a shop');
+
+}
+function done() {
+  document.getElementById('out').textContent = 'FAILS=' + fails + '\n' + lines.join('\n');
+  document.title = 'done';
+}
+try { run(); } catch (e) { lines.push('EXCEPTION ' + e.stack); fails++; done(); }
+</script>
